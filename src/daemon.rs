@@ -364,15 +364,31 @@ struct MeetingStartTrigger {
 }
 
 /// Read a file and return its trimmed contents, or None if missing or empty.
+///
+/// Logs read failures so transient FS / permission errors aren't silent: a
+/// trigger file existing but being unreadable previously looked identical to
+/// "no file" and would then be consumed by the caller's remove_file.
 fn read_trimmed_nonempty(path: &std::path::Path) -> Option<String> {
-    let contents = std::fs::read_to_string(path).ok()?;
-    let trimmed = contents.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
+    match std::fs::read_to_string(path) {
+        Ok(contents) => {
+            let trimmed = contents.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => {
+            tracing::warn!(path = %path.display(), error = %err, "Failed to read IPC trigger file");
+            None
+        }
     }
 }
+
+/// Allowed diarization backend override values from the CLI handler. Kept in
+/// sync with the `value_parser` list on `MeetingAction::Start::diarization`.
+const ALLOWED_DIARIZATION_OVERRIDES: &[&str] = &["simple", "ml"];
 
 /// Check for meeting start command (via file trigger)
 fn check_meeting_start() -> Option<MeetingStartTrigger> {
@@ -385,9 +401,22 @@ fn check_meeting_start() -> Option<MeetingStartTrigger> {
     let title = read_trimmed_nonempty(&start_file);
 
     // Diarization override is written by the CLI handler before the start
-    // trigger, so it's safe to read here. Validated values: "simple" | "ml".
+    // trigger. Clap validates the CLI arg, but the daemon trusts a runtime
+    // file written by an arbitrary process, so re-check against the allowlist
+    // here and drop unknown values with a warning.
     let diarization_file = runtime_dir.join("meeting_start_diarization");
-    let diarization = read_trimmed_nonempty(&diarization_file);
+    let diarization = read_trimmed_nonempty(&diarization_file).and_then(|value| {
+        if ALLOWED_DIARIZATION_OVERRIDES.contains(&value.as_str()) {
+            Some(value)
+        } else {
+            tracing::warn!(
+                value = %value,
+                "Ignoring unknown diarization override; expected one of {:?}",
+                ALLOWED_DIARIZATION_OVERRIDES
+            );
+            None
+        }
+    });
     let _ = std::fs::remove_file(&diarization_file);
 
     // Remove the start trigger last to acknowledge the command.

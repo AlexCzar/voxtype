@@ -2027,6 +2027,20 @@ async fn run_meeting_command(config: &config::Config, action: MeetingAction) -> 
             // Ensure GTCRN speech enhancement model is available
             setup::model::ensure_gtcrn_model();
 
+            // A --diarization override only changes the *backend*; it cannot
+            // turn diarization on when config has disabled it. Warn loudly so
+            // users don't think they're getting speaker labels they aren't.
+            let diarization_active = config.meeting.diarization.enabled;
+            if diarization.is_some() && !diarization_active {
+                eprintln!(
+                    "Warning: --diarization is a backend override and only takes effect when"
+                );
+                eprintln!(
+                    "  [meeting.diarization] enabled = true in config; diarization is disabled,"
+                );
+                eprintln!("  so the override will be ignored for this meeting.");
+            }
+
             // Write the diarization override first so it's visible by the time
             // the daemon picks up the start trigger.
             let runtime_dir = config::Config::runtime_dir();
@@ -2045,7 +2059,8 @@ async fn run_meeting_command(config: &config::Config, action: MeetingAction) -> 
 
             let suffix = diarization
                 .as_deref()
-                .map(|b| format!(" (diarization: {})", b))
+                .filter(|_| diarization_active)
+                .map(|b| format!(" (diarization backend: {})", b))
                 .unwrap_or_default();
             println!(
                 "Meeting start requested{}. Check status with 'voxtype meeting status'.",
