@@ -1999,7 +1999,7 @@ async fn run_meeting_command(config: &config::Config, action: MeetingAction) -> 
     };
 
     match action {
-        MeetingAction::Start { title } => {
+        MeetingAction::Start { title, diarization } => {
             // Check if meeting mode is enabled
             if !config.meeting.enabled {
                 eprintln!("Error: Meeting mode is disabled in config.");
@@ -2027,12 +2027,30 @@ async fn run_meeting_command(config: &config::Config, action: MeetingAction) -> 
             // Ensure GTCRN speech enhancement model is available
             setup::model::ensure_gtcrn_model();
 
+            // Write the diarization override first so it's visible by the time
+            // the daemon picks up the start trigger.
+            let runtime_dir = config::Config::runtime_dir();
+            let diarization_file = runtime_dir.join("meeting_start_diarization");
+            if let Some(ref backend) = diarization {
+                std::fs::write(&diarization_file, backend)?;
+            } else {
+                // Clear any stale override left from a prior run.
+                let _ = std::fs::remove_file(&diarization_file);
+            }
+
             // Write start trigger file (with optional title)
-            let start_file = config::Config::runtime_dir().join("meeting_start");
+            let start_file = runtime_dir.join("meeting_start");
             let content = title.unwrap_or_default();
             std::fs::write(&start_file, content)?;
 
-            println!("Meeting start requested. Check status with 'voxtype meeting status'.");
+            let suffix = diarization
+                .as_deref()
+                .map(|b| format!(" (diarization: {})", b))
+                .unwrap_or_default();
+            println!(
+                "Meeting start requested{}. Check status with 'voxtype meeting status'.",
+                suffix
+            );
         }
 
         MeetingAction::Stop => {

@@ -800,6 +800,16 @@ pub enum MeetingAction {
         /// Meeting title (optional)
         #[arg(long, short)]
         title: Option<String>,
+
+        /// Diarization backend override for this meeting only.
+        ///
+        /// `simple` attributes by audio source (You vs Remote) — best for 1:1 calls.
+        /// `ml` uses ONNX speaker embeddings for multi-speaker meetings (requires
+        /// the `ml-diarization` feature and the ECAPA-TDNN model).
+        ///
+        /// When omitted, falls back to `[meeting.diarization].backend` in config.
+        #[arg(long, value_parser = ["simple", "ml"], env = "VOXTYPE_MEETING_DIARIZATION")]
+        diarization: Option<String>,
     },
     /// Stop the current meeting
     Stop,
